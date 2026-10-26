@@ -1,0 +1,45 @@
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Agent {
+  id              String   @id @default(cuid())
+  slug            String?  @unique
+
+  agencyName      String
+  title           String?
+  specialty       String?
+  description     String   @default("") @db.Text
+  email           String?
+  phone           String?
+  website         String?
+  city            String?
+  state           String?
+  profileImage    String?
+
+  facebook        String?
+  instagram       String?
+  twitter         String?
+  tiktok          String?
+  threads         String?
+  youtube         String?
+
+  metaTitle       String?
+  metaDescription String?  @db.Text
+
+  verified        Boolean  @default(false)
+  featured        Boolean  @default(false)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([agencyName])
+  @@index([verified])
+  @@index([featured])
+}

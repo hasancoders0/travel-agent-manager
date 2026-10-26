@@ -1,0 +1,25 @@
+
+export const EMPTY_AGENT = {
+  name: "",
+  agencyName: "",
+  title: "",
+  specialty: "",
+  description: "",
+  email: "",
+  phone: "",
+  website: "",
+  location: "",
+  photo: "",
+  verified: false,
+  featured: false,
+  socialLinks: {
+    facebook: "",
+    instagram: "",
+    twitter: "",
+    tiktok: "",
+    threads: "",
+    youtube: "",
+  },
+  metaTitle: "",
+  metaDescription: "",
+};

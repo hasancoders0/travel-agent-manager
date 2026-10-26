@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -8,7 +7,7 @@ import AgentForm from "@/components/AgentForm";
 import AgentList from "@/components/AgentList";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import Toast from "@/components/Toast";
-import { createAgent, getAgents, saveAgents } from "@/lib/agents";
+import { EMPTY_AGENT } from "@/lib/agent-constants";
 
 const ADMIN_EMAIL = "admin@example.com";
 const ADMIN_PASSWORD = "Admin@123";
@@ -22,6 +21,7 @@ export default function Home() {
   const [editingAgent, setEditingAgent] = useState(null);
   const [deletingAgent, setDeletingAgent] = useState(null);
   const [toast, setToast] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   const closeToast = useCallback(() => setToast(null), []);
 
@@ -33,33 +33,93 @@ export default function Home() {
     });
   }, []);
 
-  useEffect(() => {
-    setAgents(getAgents());
+  const loadAgents = useCallback(async () => {
+    const response = await fetch("/api/agents", {
+      cache: "no-store",
+    });
 
-    try {
-      setLoggedIn(sessionStorage.getItem(SESSION_KEY) === "true");
-    } catch {
-      setLoggedIn(false);
+    if (!response.ok) {
+      throw new Error("Unable to load agents from the database.");
     }
 
-    setReady(true);
+    const data = await response.json();
+
+    if (!Array.isArray(data)) {
+      throw new Error("Unexpected response from the agents API.");
+    }
+
+    setAgents(data);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function initialize() {
+      try {
+        const session = sessionStorage.getItem(SESSION_KEY) === "true";
+
+        if (active) {
+          setLoggedIn(session);
+        }
+
+        if (session) {
+          const response = await fetch("/api/agents", {
+            cache: "no-store",
+          });
+
+          if (!response.ok) {
+            throw new Error("Unable to load agents from the database.");
+          }
+
+          const data = await response.json();
+
+          if (!Array.isArray(data)) {
+            throw new Error("Unexpected response from the agents API.");
+          }
+
+          if (active) {
+            setAgents(data);
+          }
+        }
+      } catch (error) {
+        console.error("Workspace initialization error:", error);
+
+        if (active) {
+          notify(error.message || "Unable to load workspace data.", "error");
+        }
+      } finally {
+        if (active) {
+          setReady(true);
+        }
+      }
+    }
+
+    initialize();
+
+    return () => {
+      active = false;
+    };
+  }, [notify]);
 
   function handleLogin(email, password) {
     if (
-      email.toLowerCase() !== ADMIN_EMAIL ||
+      email.trim().toLowerCase() !== ADMIN_EMAIL ||
       password !== ADMIN_PASSWORD
     ) {
       return false;
     }
-
-    setLoggedIn(true);
 
     try {
       sessionStorage.setItem(SESSION_KEY, "true");
     } catch {
       // Demo-only session.
     }
+
+    setLoggedIn(true);
+
+    loadAgents().catch((error) => {
+      notify(error.message || "Unable to load agents.", "error");
+    });
 
     return true;
   }
@@ -78,57 +138,80 @@ export default function Home() {
     }
   }
 
-  function persist(nextAgents) {
-    try {
-      saveAgents(nextAgents);
-      setAgents(nextAgents);
-      return true;
-    } catch (error) {
-      notify(error.message || "Unable to save agent data.", "error");
-      return false;
-    }
-  }
+  async function handleSave(values) {
+    if (saving) return;
 
-  function handleSave(values) {
-    if (editingAgent) {
-      const updated = agents.map((agent) =>
-        agent.id === editingAgent.id
-          ? { ...agent, ...values, id: agent.id }
-          : agent
+    setSaving(true);
+
+    try {
+      const isEditing = Boolean(editingAgent);
+
+      const response = await fetch(
+        isEditing
+          ? `/api/agents/${encodeURIComponent(editingAgent.id)}`
+          : "/api/agents",
+        {
+          method: isEditing ? "PATCH" : "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...EMPTY_AGENT,
+            ...values,
+            agencyName: values.agencyName || values.name || "",
+            socialLinks: {
+              ...EMPTY_AGENT.socialLinks,
+              ...(values.socialLinks || {}),
+            },
+          }),
+        },
       );
 
-      if (!persist(updated)) {
-        throw new Error("Unable to save changes. Please try again.");
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Unable to save agent.");
       }
+
+      await loadAgents();
 
       setFormOpen(false);
       setEditingAgent(null);
-      notify("Agent updated successfully.");
-      return;
+
+      notify(
+        isEditing ? "Agent updated successfully." : "Agent added successfully.",
+      );
+    } catch (error) {
+      notify(error.message || "Unable to save agent.", "error");
+      throw error;
+    } finally {
+      setSaving(false);
     }
-
-    const newAgent = createAgent(values);
-
-    if (!persist([newAgent, ...agents])) {
-      throw new Error("Unable to add agent. Please try again.");
-    }
-
-    setFormOpen(false);
-    setEditingAgent(null);
-    notify("Agent added successfully.");
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!deletingAgent) return;
 
-    const name = deletingAgent.agencyName || deletingAgent.name;
-    const nextAgents = agents.filter(
-      (agent) => agent.id !== deletingAgent.id
-    );
+    const agent = deletingAgent;
 
-    if (persist(nextAgents)) {
+    try {
+      const response = await fetch(
+        `/api/agents/${encodeURIComponent(agent.id)}`,
+        { method: "DELETE" },
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Unable to delete agent.");
+      }
+
+      setAgents((current) => current.filter((item) => item.id !== agent.id));
+
       setDeletingAgent(null);
-      notify(`${name} was deleted.`);
+      notify(`${agent.agencyName || agent.name} was deleted.`);
+    } catch (error) {
+      notify(error.message || "Unable to delete agent.", "error");
     }
   }
 
@@ -140,7 +223,9 @@ export default function Home() {
     );
   }
 
-  if (!loggedIn) return <LoginForm onLogin={handleLogin} />;
+  if (!loggedIn) {
+    return <LoginForm onLogin={handleLogin} />;
+  }
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-7 sm:px-6 sm:py-10">
@@ -173,7 +258,7 @@ export default function Home() {
             <div className="p-5 sm:p-8">
               <AgentForm
                 key={editingAgent?.id || "new-agent"}
-                initialAgent={editingAgent}
+                initialAgent={editingAgent || EMPTY_AGENT}
                 onSave={handleSave}
                 onCancel={() => {
                   setFormOpen(false);
